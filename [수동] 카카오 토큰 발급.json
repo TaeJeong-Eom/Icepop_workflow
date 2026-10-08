@@ -1,0 +1,244 @@
+{
+  "name": "[수동] 카카오 토큰 발급",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "6ccaa5b1-386e-4828-b136-2ddddf15cd91",
+      "name": "Execute Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// 카카오 토큰 발급용 메타데이터\n// ============================================\n// 실행 전 아래 값들 수정:\n//   1. REST_API_KEY: 카카오 디벨로퍼 → 앱 → 앱 키 → REST API 키\n//   2. AUTH_CODE: 인가코드 URL에서 받은 ?code= 다음 값\n//      (인가코드는 10분 만료. 받자마자 실행)\n// ============================================\n\nconst REST_API_KEY = '{{KAKAO_REST_API_KEY}}'\nconst AUTH_CODE = '{{AUTH_CODE}}'\nconst REDIRECT_URI = 'https://your-n8n.example.com/oauth2/callback'\n\nreturn [{\n  json: {\n    REST_API_KEY,\n    AUTH_CODE,\n    REDIRECT_URI\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "3d9282b8-8887-49cd-8d2c-a4ad545c6dca",
+      "name": "메타데이터 셋업"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kauth.kakao.com/oauth/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "authorization_code"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $json.REST_API_KEY }}"
+            },
+            {
+              "name": "redirect_uri",
+              "value": "={{ $json.REDIRECT_URI }}"
+            },
+            {
+              "name": "code",
+              "value": "={{ $json.AUTH_CODE }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "{{CLIENT_SECRET}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        464,
+        0
+      ],
+      "id": "0fb76a6d-d0c8-4719-a1b2-eb0a59632768",
+      "name": "토큰 교환"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 토큰 응답 가공 + 발급일 + 만료일 계산\nconst response = $input.first().json\n\nif (!response.refresh_token) {\n  throw new Error(`토큰 발급 실패: ${JSON.stringify(response)}`)\n}\n\nconst today = new Date()\nconst todayStr = today.toISOString().split('T')[0]\n\n// refresh_token 만료일 = 발급일 + 60일\nconst expiryDate = new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000)\nconst expiryStr = expiryDate.toISOString().split('T')[0]\n\nreturn [{\n  json: {\n    토큰명: '카카오',\n    refresh_token: response.refresh_token,\n    발급일: todayStr,\n    만료일: expiryStr,\n    access_token: response.access_token,\n    expires_in: response.expires_in,\n    refresh_token_expires_in: response.refresh_token_expires_in\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        0
+      ],
+      "id": "f4297047-f990-4222-8a7b-61bf8cee7702",
+      "name": "토큰 응답 가공"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 998306282,
+          "mode": "list",
+          "cachedResultName": "카카오_토큰",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=998306282"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 100
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        912,
+        0
+      ],
+      "id": "23d09286-7007-4f93-9c6f-5e5e3e5864d4",
+      "name": "카카오_토큰 Clear"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('토큰 응답 가공').first().json\nreturn [{\n  json: {\n    토큰명: data.토큰명,\n    refresh_token: data.refresh_token,\n    발급일: data.발급일,\n    만료일: data.만료일\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "cf32aa07-f113-4e04-89af-67b4cc600fa9",
+      "name": "시트 출력 준비"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 998306282,
+          "mode": "list",
+          "cachedResultName": "카카오_토큰",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=998306282"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": null,
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "d7cbc71c-aad2-4f9f-964c-ac4e8b97a4bd",
+      "name": "카카오_토큰 Append"
+    }
+  ],
+  "connections": {
+    "Execute Workflow": {
+      "main": [
+        [
+          {
+            "node": "메타데이터 셋업",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메타데이터 셋업": {
+      "main": [
+        [
+          {
+            "node": "토큰 교환",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "토큰 교환": {
+      "main": [
+        [
+          {
+            "node": "토큰 응답 가공",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "토큰 응답 가공": {
+      "main": [
+        [
+          {
+            "node": "카카오_토큰 Clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "카카오_토큰 Clear": {
+      "main": [
+        [
+          {
+            "node": "시트 출력 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "시트 출력 준비": {
+      "main": [
+        [
+          {
+            "node": "카카오_토큰 Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

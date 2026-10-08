@@ -1,0 +1,419 @@
+{
+  "name": "[자동] 1. 발주_대기 빌드 (gviz)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 3"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2704,
+        1280
+      ],
+      "id": "0c079ab5-56eb-46d0-a813-ab2be0e88203",
+      "name": "매주 수요일 09:00"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2704,
+        1472
+      ],
+      "id": "488659ec-75fb-442e-8723-c1fa3dd6d08f",
+      "name": "Execute Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 메타데이터 셋업\nconst today = new Date()\nconst todayStr = today.toISOString().split('T')[0]\n\nreturn [{\n  json: {\n    today: todayStr,\n    spreadsheetId: 'YOUR_ICEPOP_SHEET_ID',\n    sheetMaster: '판매중상품',\n    sheetSales: '6주간_판매량',\n    sheetQueue: '발주_대기'\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2480,
+        1376
+      ],
+      "id": "618f1924-3ef9-4316-8123-dbf2d2200290",
+      "name": "셋업"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $json.sheetMaster }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2256,
+        1376
+      ],
+      "id": "701254ad-99af-4350-ae37-a01a90f344e2",
+      "name": "마스터 gviz 조회"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $('셋업').first().json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $('셋업').first().json.sheetSales }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2032,
+        1376
+      ],
+      "id": "8ec729a6-3bc3-4d07-bfb8-78b19187d414",
+      "name": "6주간_판매량 gviz 조회"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $('셋업').first().json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $('셋업').first().json.sheetQueue }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1808,
+        1376
+      ],
+      "id": "864ae71e-04d7-4957-b47d-e7e59d477040",
+      "name": "발주_대기 gviz 조회"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// 워크플로우 1: 발주_대기 빌드\n// - 6주간_판매량의 7일 판매 > 0 상품 → 발주_대기에 등록\n// - 마스터 매칭 (바코드, 박스당 수량)\n// - 기존 등록일 유지\n// - 42일 도태\n// - 신상품 → 마스터에 추가 대상\n// ============================================\n\nconst today = new Date()\nconst todayStr = today.toISOString().split('T')[0]\n\n// gviz 응답 파싱 함수\nfunction parseGviz(raw) {\n  const match = raw.match(/google\\.visualization\\.Query\\.setResponse\\((.*)\\);?\\s*$/s)\n  if (!match) throw new Error('gviz 파싱 실패')\n  return JSON.parse(match[1])\n}\n\n// gviz table → 객체 배열 (헤더 기반)\nfunction toObjects(parsed) {\n  const cols = parsed.table.cols.map(c => c.label || c.id)\n  return parsed.table.rows.map(row => {\n    const obj = {}\n    row.c.forEach((cell, i) => {\n      obj[cols[i]] = cell?.v ?? ''\n    })\n    return obj\n  })\n}\n\nconst master = toObjects(parseGviz($('마스터 gviz 조회').first().json.data))\nconst sales = toObjects(parseGviz($('6주간_판매량 gviz 조회').first().json.data))\nconst queue = toObjects(parseGviz($('발주_대기 gviz 조회').first().json.data))\n\n// === 1. 마스터 맵 (상품명 → 마스터 행) ===\nconst masterByName = {}\nfor (const m of master) {\n  const name = String(m['상품명'] || '').trim()\n  if (name) masterByName[name] = m\n}\n\n// === 2. 발주_대기 맵 (상품명_매장 → 등록일) ===\nconst queueByKey = {}\nfor (const q of queue) {\n  const name = String(q['상품명'] || '').trim()\n  const store = String(q['매장'] || '').trim()\n  const regDate = String(q['등록일'] || '').trim()\n  if (name && store) {\n    queueByKey[`${name}_${store}`] = regDate\n  }\n}\n\n// === 3. 신상품 감지 ===\nconst newProducts = []\nfor (const s of sales) {\n  const name = String(s['상품명'] || '').trim()\n  if (!name) continue\n  if (!masterByName[name]) {\n    newProducts.push({\n      No: '',\n      상품명: name,\n      바코드: '',\n      '개당 판매가': '',\n      '박스당 수량': ''\n    })\n  }\n}\n\n// === 4. 새 발주_대기 빌드 ===\nconst newQueue = []\n\nfor (const s of sales) {\n  const name = String(s['상품명'] || '').trim()\n  if (!name) continue\n  \n  const masterItem = masterByName[name]\n  if (!masterItem) continue  // 마스터에 없으면 스킵 (신상품은 다음 주부터)\n  \n  const barcode = String(masterItem['바코드'] || '').trim()\n  const boxQty = masterItem['박스당 수량']\n  \n  for (const store of ['1호점', '2호점']) {\n    const sold7 = parseInt(s[`${store}_7일`]) || 0\n    if (sold7 <= 0) continue  // 해당 매장 7일 판매 없음\n    \n    const key = `${name}_${store}`\n    const existingRegDate = queueByKey[key]\n    \n    let regDate\n    if (existingRegDate) {\n      regDate = existingRegDate\n      \n      // 42일 경과 체크 (도태)\n      const regDateObj = new Date(regDate)\n      const daysInQueue = (today - regDateObj) / (24 * 60 * 60 * 1000)\n      if (daysInQueue >= 42) continue\n    } else {\n      regDate = todayStr\n    }\n    \n    newQueue.push({\n      바코드: barcode,\n      상품명: name,\n      매장: store,\n      '박스당 수량': boxQty,\n      등록일: regDate\n    })\n  }\n}\n\nreturn [{\n  json: {\n    newProducts,\n    newQueue,\n    stats: {\n      마스터_총: master.length,\n      매출_총: sales.length,\n      큐_기존: queue.length,\n      신상품: newProducts.length,\n      큐_새: newQueue.length,\n      큐_신규등록: newQueue.filter(q => q.등록일 === todayStr).length,\n      큐_기존유지: newQueue.filter(q => q.등록일 !== todayStr).length\n    }\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1584,
+        1376
+      ],
+      "id": "2f24f542-fe0b-4cf0-8f54-166187232342",
+      "name": "메인 로직"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json\nconst items = data.newProducts || []\nif (items.length === 0) return []\nreturn items.map(p => ({ json: p }))"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        1280
+      ],
+      "id": "ba145b9f-de6c-434e-a275-5fe5d719c6fd",
+      "name": "신상품 준비"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1454338910,
+          "mode": "list",
+          "cachedResultName": "판매중상품",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=1454338910"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "No",
+              "displayName": "No",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "상품명",
+              "displayName": "상품명",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "바코드",
+              "displayName": "바코드",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "개당 판매가",
+              "displayName": "개당 판매가",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "박스당 수량",
+              "displayName": "박스당 수량",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1136,
+        1280
+      ],
+      "id": "ab8c51ef-2131-4c75-a457-3c0a2cb7d936",
+      "name": "마스터 신상품 Append"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1750557886,
+          "mode": "list",
+          "cachedResultName": "발주_대기",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=1750557886"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 10000
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1360,
+        1472
+      ],
+      "id": "555b6056-bb13-4185-bfc9-0e140c5df6dc",
+      "name": "발주_대기 Clear"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('메인 로직').first().json\nconst items = data.newQueue || []\nif (items.length === 0) return []\nreturn items.map(q => ({ json: q }))"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        1472
+      ],
+      "id": "c3dad36a-c728-4e8e-95b0-ba0b7b80fa34",
+      "name": "큐 준비"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1750557886,
+          "mode": "list",
+          "cachedResultName": "발주_대기",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=1750557886"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": null,
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        1472
+      ],
+      "id": "7e69ac14-26c1-4745-967d-c92f601f8366",
+      "name": "발주_대기 Append"
+    }
+  ],
+  "connections": {
+    "매주 수요일 09:00": {
+      "main": [
+        [
+          {
+            "node": "셋업",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow": {
+      "main": [
+        [
+          {
+            "node": "셋업",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "셋업": {
+      "main": [
+        [
+          {
+            "node": "마스터 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "마스터 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "6주간_판매량 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6주간_판매량 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "발주_대기 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발주_대기 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "메인 로직",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메인 로직": {
+      "main": [
+        [
+          {
+            "node": "신상품 준비",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "발주_대기 Clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "신상품 준비": {
+      "main": [
+        [
+          {
+            "node": "마스터 신상품 Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발주_대기 Clear": {
+      "main": [
+        [
+          {
+            "node": "큐 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "큐 준비": {
+      "main": [
+        [
+          {
+            "node": "발주_대기 Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,276 @@
+{
+  "name": "[자동] 0. 6주간_판매량 갱신 (gviz)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 8 * * 3"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1344,
+        208
+      ],
+      "id": "4b2e0e9b-ca78-4a40-8991-92815e4e8d0f",
+      "name": "매주 수요일 08:30"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        400
+      ],
+      "id": "7595a826-7872-4d80-8c21-f51d180d34a5",
+      "name": "Execute Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 42일/7일 컷오프 날짜 계산\nconst today = new Date()\nconst todayStr = today.toISOString().split('T')[0]\n\nconst sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)\n  .toISOString().split('T')[0]\nconst fortyTwoDaysAgo = new Date(today.getTime() - 42 * 24 * 60 * 60 * 1000)\n  .toISOString().split('T')[0]\n\nreturn [{\n  json: {\n    today: todayStr,\n    sevenDaysAgo,\n    fortyTwoDaysAgo,\n    spreadsheetId: 'YOUR_ICEPOP_SHEET_ID',\n    sheet1: '1호점_상품별',\n    sheet2: '2호점_상품별'\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        304
+      ],
+      "id": "d09b0268-9fbd-4729-9484-0d3db56b3f36",
+      "name": "날짜 계산"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $json.sheet1 }}&tq=SELECT A,E,F WHERE A >= '{{ $json.fortyTwoDaysAgo }}'",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1792,
+        304
+      ],
+      "id": "e2e2b05f-ef8b-405c-bde7-bc2755c74d19",
+      "name": "1호점 gviz 조회"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $('날짜 계산').first().json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $('날짜 계산').first().json.sheet2 }}&tq=SELECT A,E,F WHERE A >= '{{ $('날짜 계산').first().json.fortyTwoDaysAgo }}'",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2016,
+        304
+      ],
+      "id": "b1feb2a9-d736-4d43-9c0c-5d9447070757",
+      "name": "2호점 gviz 조회"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// gviz 응답 파싱 + 매장별 × 상품명별 집계\n// ============================================\n\nconst meta = $('날짜 계산').first().json\nconst sevenDaysAgo = meta.sevenDaysAgo\nconst fortyTwoDaysAgo = meta.fortyTwoDaysAgo\n\n// gviz 응답 파싱 (wrapper 제거)\nfunction parseGvizResponse(raw) {\n  // /*O_o*/google.visualization.Query.setResponse({...});\n  const match = raw.match(/google\\.visualization\\.Query\\.setResponse\\((.*)\\);?\\s*$/s)\n  if (!match) {\n    throw new Error('gviz 응답 파싱 실패')\n  }\n  return JSON.parse(match[1])\n}\n\n// HTTP Request 노드 응답은 .data 필드에 텍스트로 들어옴 (responseFormat: text)\nconst raw1 = $('1호점 gviz 조회').first().json.data\nconst raw2 = $('2호점 gviz 조회').first().json.data\n\nconst parsed1 = parseGvizResponse(raw1)\nconst parsed2 = parseGvizResponse(raw2)\n\n// rows → 데이터 배열 변환\n// SELECT A,E,F → cols: [매출일자, 상품명, 판매수량]\nfunction rowsToData(parsed) {\n  return parsed.table.rows.map(row => ({\n    매출일자: row.c[0]?.v || '',\n    상품명: row.c[1]?.v || '',\n    판매수량: parseInt(row.c[2]?.v) || 0\n  }))\n}\n\nconst data1 = rowsToData(parsed1)\nconst data2 = rowsToData(parsed2)\n\n// === 집계 ===\nconst aggregate = {}\n\nfunction process(data, store) {\n  for (const row of data) {\n    const date = row.매출일자\n    const name = row.상품명\n    const qty = row.판매수량\n    \n    if (!date || !name) continue\n    \n    const is7Days = date >= sevenDaysAgo\n    const is42Days = date >= fortyTwoDaysAgo\n    \n    if (!is42Days) continue\n    \n    if (!aggregate[name]) {\n      aggregate[name] = {\n        상품명: name,\n        '1호점_7일': 0,\n        '2호점_7일': 0,\n        '7일_총합': 0,\n        '1호점_42일': 0,\n        '2호점_42일': 0,\n        '42일_총합': 0\n      }\n    }\n    \n    const agg = aggregate[name]\n    \n    if (is7Days) {\n      agg[`${store}_7일`] += qty\n      agg['7일_총합'] += qty\n    }\n    agg[`${store}_42일`] += qty\n    agg['42일_총합'] += qty\n  }\n}\n\nprocess(data1, '1호점')\nprocess(data2, '2호점')\n\n// 결과 정리 + 정렬 (상품명 가나다 순)\nconst results = Object.values(aggregate)\n  .filter(a => a['42일_총합'] > 0)  // 42일 판매 0이면 제외\n  .sort((a, b) => a.상품명.localeCompare(b.상품명, 'ko'))\n\nreturn [{\n  json: {\n    aggregated: results,\n    stats: {\n      총_상품수: results.length,\n      sevenDaysAgo,\n      fortyTwoDaysAgo,\n      raw1_rows: data1.length,\n      raw2_rows: data2.length\n    }\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        304
+      ],
+      "id": "4ba4f77d-2077-4019-b9ae-cb128d2ebcb4",
+      "name": "메모리 집계"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 911882984,
+          "mode": "list",
+          "cachedResultName": "6주간_판매량",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=911882984"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 10000
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2464,
+        304
+      ],
+      "id": "285713b9-94f2-4d63-899f-b6a2f91cb771",
+      "name": "6주간_판매량 Clear"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('메모리 집계').first().json\nconst items = data.aggregated || []\nif (items.length === 0) return []\nreturn items.map(item => ({ json: item }))"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        304
+      ],
+      "id": "9c380fbe-dea0-457d-a4de-f043663e00f4",
+      "name": "출력 준비"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 911882984,
+          "mode": "list",
+          "cachedResultName": "6주간_판매량",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=911882984"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": null,
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2912,
+        304
+      ],
+      "id": "e4c7f812-989d-480a-a844-8d6246a6390e",
+      "name": "6주간_판매량 Append"
+    }
+  ],
+  "connections": {
+    "매주 수요일 08:30": {
+      "main": [
+        [
+          {
+            "node": "날짜 계산",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow": {
+      "main": [
+        [
+          {
+            "node": "날짜 계산",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "날짜 계산": {
+      "main": [
+        [
+          {
+            "node": "1호점 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1호점 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "2호점 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2호점 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "메모리 집계",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메모리 집계": {
+      "main": [
+        [
+          {
+            "node": "6주간_판매량 Clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6주간_판매량 Clear": {
+      "main": [
+        [
+          {
+            "node": "출력 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "출력 준비": {
+      "main": [
+        [
+          {
+            "node": "6주간_판매량 Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

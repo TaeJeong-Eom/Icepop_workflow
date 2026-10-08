@@ -1,0 +1,695 @@
+{
+  "name": "[자동] 3. 카톡 발송 + 큐 정리",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "10 9 * * 3"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "394bd694-a41e-4d56-a842-ce914599e906",
+      "name": "매주 수요일 09:10"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ],
+      "id": "e10b39cb-590b-4fd6-962c-d0daaa929b11",
+      "name": "Execute Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    spreadsheetId: 'YOUR_ICEPOP_SHEET_ID',\n    sheetRec: '이번주_발주',\n    sheetMaster: '판매중상품',\n    sheetQueue: '발주_대기'\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        112
+      ],
+      "id": "bf3a5ef7-9aa1-454a-8658-74924bb833f8",
+      "name": "셋업"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $json.sheetRec }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        464,
+        112
+      ],
+      "id": "622429e6-3d52-489a-b61c-a2cf11de5e9a",
+      "name": "이번주_발주 gviz 조회"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $('셋업').first().json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $('셋업').first().json.sheetMaster }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        112
+      ],
+      "id": "a612473b-a092-4565-939b-5f4a76ac91d6",
+      "name": "마스터 gviz 조회"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $('셋업').first().json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $('셋업').first().json.sheetQueue }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        912,
+        112
+      ],
+      "id": "0fa372d9-97d3-4928-a154-27844f3f7672",
+      "name": "발주_대기 gviz 조회"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// 메시지 생성 + 큐 정리 데이터 준비\n// ============================================\n\nfunction parseGviz(raw) {\n  const match = raw.match(/google\\.visualization\\.Query\\.setResponse\\((.*)\\);?\\s*$/s)\n  if (!match) throw new Error('gviz 파싱 실패')\n  return JSON.parse(match[1])\n}\n\nfunction toObjects(parsed) {\n  const cols = parsed.table.cols.map(c => c.label || c.id)\n  return parsed.table.rows.map(row => {\n    const obj = {}\n    row.c.forEach((cell, i) => {\n      obj[cols[i]] = cell?.v ?? ''\n    })\n    return obj\n  })\n}\n\nconst recs = toObjects(parseGviz($('이번주_발주 gviz 조회').first().json.data))\nconst master = toObjects(parseGviz($('마스터 gviz 조회').first().json.data))\nconst queue = toObjects(parseGviz($('발주_대기 gviz 조회').first().json.data))\n\n// === 1. 매장별 추천 분리 ===\nconst EXCLUDE_PRODUCTS = ['비닐봉투']  // 발주 메시지에서 제외할 상품\nconst byStore = { '1호점': [], '2호점': [] }\nfor (const r of recs) {\n  const store = String(r['매장'] || '').trim()\n  if (byStore[store]) {\n    byStore[store].push({\n      상품명: String(r['상품명'] || '').trim(),\n      박스수: r['박스수']\n    })\n  }\n}\n\n// === 2. 매장별 메시지 생성 ===\nconst today = new Date()\nconst dateLabel = `${today.getMonth() + 1}/${today.getDate()}`\n\nfunction buildOrderMessage(store, items) {\n  if (items.length === 0) return null\n  \n  let msg = `발주 부탁드립니다 (${dateLabel}) [${store}]\\n`\n  msg += `(단위: BOX)\\n`\n  for (const item of items) {\n    msg += `* ${item.상품명} : ${item.박스수}\\n`\n  }\n  return msg.trim()\n}\n\nconst msg1호점 = buildOrderMessage('1호점', byStore['1호점'])\nconst msg2호점 = buildOrderMessage('2호점', byStore['2호점'])\n\n// === 3. 신상품 감지 (마스터에서 박스당 수량 빈 상품) ===\nconst newProducts = master.filter(m => {\n  const name = String(m['상품명'] || '').trim()\n  const boxQty = String(m['박스당 수량'] || '').trim()\n  return name && boxQty === ''\n}).map(m => String(m['상품명']).trim())\n\nlet msgNew = null\nif (newProducts.length > 0) {\n  msgNew = `🆕 신상품 추가\\n`\n  msgNew += `판매중상품 시트의 박스당 수량 입력이 필요합니다.\\n\\n`\n  for (const name of newProducts) {\n    msgNew += `* ${name}\\n`\n  }\n  msgNew = msgNew.trim()\n}\n\n// === 4. 큐 정리용 데이터 ===\n// 이번주_발주의 (상품명_매장) 키 = 큐에서 제거할 대상\nconst removeKeys = new Set(\n  recs.map(r => `${String(r['상품명']).trim()}_${String(r['매장']).trim()}`)\n)\n\n// 살아남을 큐 = 추천 안 통과한 행\nconst survivedQueue = queue\n  .map(q => ({\n    바코드: String(q['바코드'] || '').trim(),\n    상품명: String(q['상품명'] || '').trim(),\n    매장: String(q['매장'] || '').trim(),\n    '박스당 수량': q['박스당 수량'],\n    등록일: String(q['등록일'] || '').trim()\n  }))\n  .filter(q => !removeKeys.has(`${q.상품명}_${q.매장}`))\n  .filter(q => q.상품명)\n\nreturn [{\n  json: {\n    msg1호점,\n    msg2호점,\n    msgNew,\n    survivedQueue,\n    stats: {\n      추천_1호점: byStore['1호점'].length,\n      추천_2호점: byStore['2호점'].length,\n      신상품: newProducts.length,\n      큐_제거: removeKeys.size,\n      큐_살아남음: survivedQueue.length\n    }\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        112
+      ],
+      "id": "c09f4e30-38ce-4e40-b505-e16511a00dbc",
+      "name": "메시지 생성"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "DolHHsxqEuRYfFf8",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/DolHHsxqEuRYfFf8",
+          "cachedResultName": "[서브] 카카오 로그인"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1344,
+        112
+      ],
+      "id": "2247ef72-b3d7-4b0a-ac48-25a81831d0c6",
+      "name": "카카오 로그인 (서브)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "check-1호점",
+              "leftValue": "={{ $('메시지 생성').first().json.msg1호점 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1568,
+        112
+      ],
+      "id": "5666f53c-fd29-4d7a-b5f2-43e47049e15c",
+      "name": "1호점 메시지 있음?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kapi.kakao.com/v2/api/talk/memo/default/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('카카오 로그인 (서브)').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "template_object",
+              "value": "={\"object_type\":\"text\",\"text\":{{ JSON.stringify($('메시지 생성').first().json.msg1호점) }},\"link\":{\"web_url\":\"https://your-n8n.example.com\",\"mobile_web_url\":\"https://your-n8n.example.com\"}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1792,
+        0
+      ],
+      "id": "1a422139-cb77-4bc2-9a2c-a678a3aa93d6",
+      "name": "1호점 카톡 발송"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "check-2호점",
+              "leftValue": "={{ $('메시지 생성').first().json.msg2호점 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2000,
+        112
+      ],
+      "id": "cb4618e3-7906-4e26-959c-1629e732d4bc",
+      "name": "2호점 메시지 있음?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kapi.kakao.com/v2/api/talk/memo/default/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('카카오 로그인 (서브)').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "template_object",
+              "value": "={\"object_type\":\"text\",\"text\":{{ JSON.stringify($('메시지 생성').first().json.msg2호점) }},\"link\":{\"web_url\":\"https://your-n8n.example.com\",\"mobile_web_url\":\"https://your-n8n.example.com\"}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2224,
+        0
+      ],
+      "id": "20be7c14-d712-4667-8901-80879b743b8a",
+      "name": "2호점 카톡 발송"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "check-new",
+              "leftValue": "={{ $('메시지 생성').first().json.msgNew }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2448,
+        112
+      ],
+      "id": "345201fe-ccd0-4ae9-9051-7abf068842a8",
+      "name": "신상품 알림 있음?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kapi.kakao.com/v2/api/talk/memo/default/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('카카오 로그인 (서브)').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "template_object",
+              "value": "={\"object_type\":\"text\",\"text\":{{ JSON.stringify($('메시지 생성').first().json.msgNew) }},\"link\":{\"web_url\":\"https://your-n8n.example.com\",\"mobile_web_url\":\"https://your-n8n.example.com\"}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2672,
+        0
+      ],
+      "id": "05ae8fc7-a3a1-4d7d-b7ec-c8e229bcfd56",
+      "name": "신상품 카톡 발송"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1750557886,
+          "mode": "list",
+          "cachedResultName": "발주_대기",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=1750557886"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 10000
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2880,
+        112
+      ],
+      "id": "5e26cb45-cfd0-44a7-96da-ffd54d44795a",
+      "name": "발주_대기 Clear"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('메시지 생성').first().json\nconst items = data.survivedQueue || []\nif (items.length === 0) return []\nreturn items.map(q => ({ json: q }))"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3104,
+        112
+      ],
+      "id": "ea001dd3-1f6a-418b-ac39-18b06f04b5f0",
+      "name": "큐 준비"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1750557886,
+          "mode": "list",
+          "cachedResultName": "발주_대기",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=1750557886"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "바코드",
+              "displayName": "바코드",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "상품명",
+              "displayName": "상품명",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "매장",
+              "displayName": "매장",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "박스당 수량",
+              "displayName": "박스당 수량",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "등록일",
+              "displayName": "등록일",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3328,
+        112
+      ],
+      "id": "5811a632-d0c8-4781-ba3e-28d67b64f2fb",
+      "name": "발주_대기 Append"
+    }
+  ],
+  "connections": {
+    "매주 수요일 09:10": {
+      "main": [
+        [
+          {
+            "node": "셋업",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow": {
+      "main": [
+        [
+          {
+            "node": "셋업",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "셋업": {
+      "main": [
+        [
+          {
+            "node": "이번주_발주 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "이번주_발주 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "마스터 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "마스터 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "발주_대기 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발주_대기 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "메시지 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메시지 생성": {
+      "main": [
+        [
+          {
+            "node": "카카오 로그인 (서브)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "카카오 로그인 (서브)": {
+      "main": [
+        [
+          {
+            "node": "1호점 메시지 있음?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1호점 메시지 있음?": {
+      "main": [
+        [
+          {
+            "node": "1호점 카톡 발송",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "2호점 메시지 있음?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1호점 카톡 발송": {
+      "main": [
+        [
+          {
+            "node": "2호점 메시지 있음?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2호점 메시지 있음?": {
+      "main": [
+        [
+          {
+            "node": "2호점 카톡 발송",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "신상품 알림 있음?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2호점 카톡 발송": {
+      "main": [
+        [
+          {
+            "node": "신상품 알림 있음?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "신상품 알림 있음?": {
+      "main": [
+        [
+          {
+            "node": "신상품 카톡 발송",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "발주_대기 Clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "신상품 카톡 발송": {
+      "main": [
+        [
+          {
+            "node": "발주_대기 Clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발주_대기 Clear": {
+      "main": [
+        [
+          {
+            "node": "큐 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "큐 준비": {
+      "main": [
+        [
+          {
+            "node": "발주_대기 Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

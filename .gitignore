@@ -1,0 +1,10 @@
+# 민감정보/로컬 파일
+.env
+*.env
+*.sqlite
+*.db
+*.pem
+*.key
+credentials*.json
+*_raw*/
+.DS_Store

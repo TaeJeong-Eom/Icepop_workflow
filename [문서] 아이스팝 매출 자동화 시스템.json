@@ -1,0 +1,26 @@
+{
+  "name": "[문서] 아이스팝 매출 자동화 시스템",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# 아이스팝 매출 자동화 시스템\n\n## 시스템 개요\nPOSHUB POS → n8n → Google Sheets → Looker Studio\n\n## 서버 정보\n- 호스팅: Oracle Cloud (한국 리전)\n- 도메인: your-n8n.example.com\n- 접속 계정: you@example.com\n\n## 자동화 흐름\n[자동] 일일 매출 수집 (매일 23:30)\n  ├─ 영수증별 1·2호점\n  ├─ 시간대별\n  └─ 상품별 1·2호점\n\n## 데이터 저장\n- 시트: 아이스팝코리아_매출데이터\n- 소유자: you@example.com\n- 시각화: Looker Studio\n\n## 운영 매뉴얼\n- 매일 아침: 시트 데이터 확인 (전날 23:30 자동 실행 결과)\n- 적재 실패 시: 수동 실행 또는 백필\n- 시트 한도: 1천만 셀 (정기 정리)\n\n## 문제 해결\n- POSHUB 응답 없음 → 다음날 백필 실행\n- 시트 권한 에러 → Service Account 권한 확인\n- 자동 실행 안 됨 → n8n 워크플로우 Active 상태 확인\n\n## 연락처\n- 시스템 구축자: 엄태정\n- P.H: 010 5644 5725\n",
+        "height": 800,
+        "width": 448
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -64
+      ],
+      "id": "11e3f889-9c19-4b0c-8b36-cd8a1ed710b0",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

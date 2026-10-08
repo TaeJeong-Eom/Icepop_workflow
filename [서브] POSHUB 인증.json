@@ -1,0 +1,93 @@
+{
+  "name": "[서브] POSHUB 인증",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://k.poshub.co.kr/login/login_check.jsp",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "mac_addr"
+            },
+            {
+              "name": "AutoFg",
+              "value": "W"
+            },
+            {
+              "name": "user_id",
+              "value": "{{USER_ID}}"
+            },
+            {
+              "name": "user_pwd",
+              "value": "{{USER_PWD}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        336,
+        -80
+      ],
+      "id": "6959df81-c8ec-45f4-84ae-907ea805930f",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cookie = $input.first().json.headers['set-cookie'][0];\nconst jsessionid = cookie.split(';')[0].split('=')[1];\n\nreturn [{\n  json: {\n    jsessionid: jsessionid\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        -80
+      ],
+      "id": "a38c6357-f724-43bf-9eea-4f9c3aa95408",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "content": "# POSHUB 인증 서브워크플로우\n\n## 용도\nPOSHUB 시스템 로그인 → JSESSIONID 발급\n모든 조회/적재 워크플로우가 호출\n\n## 실행 방법\n- 자동 호출만 (다른 워크플로우가 Execute Workflow로 호출)\n- 수동 실행 불필요\n\n## 동작\nPOSHUB 로그인 페이지 호출\n  ↓\n세션 쿠키 (JSESSIONID) 발급\n  ↓\n호출자에게 반환\n\n## 호출되는 곳\n- 모든 [서브] 조회_* (6개)\n- 모든 [서브] 적재_* (5개) — 간접 호출\n- 모든 [백필] * (4개)\n\n## 주의사항\n- POSHUB 로그인 정보 변경 시 이 워크플로우 수정 (HTTP Request 노드)\n- 사용자 ID: {{POS_USER_ID}}, 비밀번호 노출 주의",
+        "height": 592,
+        "width": 480
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        -96
+      ],
+      "id": "f7797f10-a42e-47b7-8fe4-0abd39bb7404",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,276 @@
+{
+  "name": "[자동] 2. 발주 추천 (gviz)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 9 * * 3"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -176,
+        -80
+      ],
+      "id": "c682bbe4-0a07-43ed-b60c-5bf49bebd6e0",
+      "name": "매주 수요일 09:05"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        128
+      ],
+      "id": "d1f0d743-5b3e-4658-86e2-045c4f2947f9",
+      "name": "Execute Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    spreadsheetId: 'YOUR_ICEPOP_SHEET_ID',\n    sheetQueue: '발주_대기',\n    sheetSales: '6주간_판매량'\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        32
+      ],
+      "id": "89251629-6896-47b2-bb37-075db6679dee",
+      "name": "셋업"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $json.sheetQueue }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        32
+      ],
+      "id": "3f6ed405-c640-4e67-9875-ef8854cf8b74",
+      "name": "발주_대기 gviz 조회"
+    },
+    {
+      "parameters": {
+        "url": "=https://docs.google.com/spreadsheets/d/{{ $('셋업').first().json.spreadsheetId }}/gviz/tq?tqx=out:json&sheet={{ $('셋업').first().json.sheetSales }}&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        512,
+        32
+      ],
+      "id": "a895e674-c658-4dab-a188-ec590bfe6935",
+      "name": "6주간_판매량 gviz 조회"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1353918994,
+          "mode": "list",
+          "cachedResultName": "이번주_발주",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=1353918994"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 10000
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        944,
+        32
+      ],
+      "id": "13b33afa-8061-4a27-ab51-a8d74f269ec0",
+      "name": "이번주_발주 Clear"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('50% 룰 평가').first().json\nconst items = data.recommendations || []\nif (items.length === 0) return []\nreturn items.map(r => ({ json: r }))"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        32
+      ],
+      "id": "3b21c67d-1d81-4ad0-8dc9-2f8ea3549207",
+      "name": "추천 준비"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1353918994,
+          "mode": "list",
+          "cachedResultName": "이번주_발주",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=1353918994"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1392,
+        32
+      ],
+      "id": "cd248379-c91a-4028-84f9-6a36aef92720",
+      "name": "이번주_발주 Append"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// 워크플로우 2: 발주 추천\n// - 발주_대기 각 행:\n//   - 박스당 수량 있고\n//     - 박스수 = 비율의 정수부 + 소수부가 BOX_ADD_T 이상이면 1 추가. 1박스 이상이면 추천\n// - 이번주_발주 시트에 적재 (Clear + Append)\n// - 발주_대기는 안 건드림 (워크플로우 3이 카톡 후 정리)\n// ============================================\nconst BOX_ADD_T = 0.7  // 박스 추가 임계값. 소수부가 이 값 이상일 때만 박스 1개 추가. 조정은 여기서만.\n\nfunction parseGviz(raw) {\n  const match = raw.match(/google\\.visualization\\.Query\\.setResponse\\((.*)\\);?\\s*$/s)\n  if (!match) throw new Error('gviz 파싱 실패')\n  return JSON.parse(match[1])\n}\n\nfunction toObjects(parsed) {\n  const cols = parsed.table.cols.map(c => c.label || c.id)\n  return parsed.table.rows.map(row => {\n    const obj = {}\n    row.c.forEach((cell, i) => {\n      obj[cols[i]] = cell?.v ?? ''\n    })\n    return obj\n  })\n}\n\nconst queue = toObjects(parseGviz($('발주_대기 gviz 조회').first().json.data))\nconst sales = toObjects(parseGviz($('6주간_판매량 gviz 조회').first().json.data))\n\n// === 1. 6주간_판매량 맵 (상품명 → 매장별 7일 판매량) ===\nconst salesByName = {}\nfor (const s of sales) {\n  const name = String(s['상품명'] || '').trim()\n  if (!name) continue\n  salesByName[name] = {\n    '1호점_7일': parseInt(s['1호점_7일']) || 0,\n    '2호점_7일': parseInt(s['2호점_7일']) || 0\n  }\n}\n\n// === 2. 발주_대기 각 행 평가 ===\nconst recommendations = []\n\nfor (const q of queue) {\n  const name = String(q['상품명'] || '').trim()\n  const store = String(q['매장'] || '').trim()\n  const barcode = String(q['바코드'] || '').trim()\n  const boxQty = parseInt(q['박스당 수량']) || 0\n  \n  if (!name || !store) continue\n  if (boxQty === 0) continue  // 박스당 수량 없으면 평가 X\n  \n  const sale = salesByName[name]\n  if (!sale) continue  // 6주간_판매량에 없음 (드문 케이스)\n  \n  const sold7 = sale[`${store}_7일`] || 0\n  const ratio = sold7 / boxQty\n  const frac = ratio % 1\n  const boxes = Math.floor(ratio) + (frac >= BOX_ADD_T ? 1 : 0)\n  \n  // 박스 추가 임계값 룰 - 편입 기준과 추가 기준을 BOX_ADD_T 하나로 통일\n  if (boxes >= 1) {\n    recommendations.push({\n      바코드: barcode,\n      상품명: name,\n      매장: store,\n      박스수: boxes,\n      판매량_7일: sold7\n    })\n  }\n}\n\n// 정렬: 매장 → 상품명\nrecommendations.sort((a, b) => {\n  if (a.매장 !== b.매장) return a.매장.localeCompare(b.매장, 'ko')\n  return a.상품명.localeCompare(b.상품명, 'ko')\n})\n\nreturn [{\n  json: {\n    recommendations,\n    stats: {\n      평가_대상: queue.length,\n      추천_총: recommendations.length,\n      추천_1호점: recommendations.filter(r => r.매장 === '1호점').length,\n      추천_2호점: recommendations.filter(r => r.매장 === '2호점').length\n    }\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        32
+      ],
+      "id": "5ac7926e-e493-45ca-ae54-c0bea98e5d83",
+      "name": "50% 룰 평가"
+    }
+  ],
+  "connections": {
+    "매주 수요일 09:05": {
+      "main": [
+        [
+          {
+            "node": "셋업",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow": {
+      "main": [
+        [
+          {
+            "node": "셋업",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "셋업": {
+      "main": [
+        [
+          {
+            "node": "발주_대기 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발주_대기 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "6주간_판매량 gviz 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6주간_판매량 gviz 조회": {
+      "main": [
+        [
+          {
+            "node": "50% 룰 평가",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "이번주_발주 Clear": {
+      "main": [
+        [
+          {
+            "node": "추천 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "추천 준비": {
+      "main": [
+        [
+          {
+            "node": "이번주_발주 Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "50% 룰 평가": {
+      "main": [
+        [
+          {
+            "node": "이번주_발주 Clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

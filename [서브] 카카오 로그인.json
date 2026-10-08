@@ -1,0 +1,160 @@
+{
+  "name": "[서브] 카카오 로그인",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "workflow_call"
+        ],
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -16,
+        0
+      ],
+      "id": "3f42257d-c7d2-4235-a05c-d0c3877b3ba1",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "url": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/gviz/tq?tqx=out:json&sheet=카카오_토큰&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "9c56f418-02d9-4366-a563-65ce17151cb9",
+      "name": "토큰 시트 조회"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 시트에서 refresh_token 추출 (헤더 다음 행)\nfunction parseGviz(raw) {\n  const match = raw.match(/google\\.visualization\\.Query\\.setResponse\\((.*)\\);?\\s*$/s)\n  if (!match) throw new Error('gviz 파싱 실패')\n  return JSON.parse(match[1])\n}\n\nconst raw = $input.first().json.data\nconst parsed = parseGviz(raw)\n\nif (!parsed.table.rows || parsed.table.rows.length < 2) {\n  throw new Error('카카오_토큰 시트가 비어있음 (헤더만 있음)')\n}\n\n// rows[0] = 헤더, rows[1] = 첫 데이터\nconst row = parsed.table.rows[1]\nconst refreshToken = row.c[1]?.v || ''\n\nif (!refreshToken) {\n  throw new Error('refresh_token이 시트에 없음')\n}\n\nreturn [{\n  json: {\n    REST_API_KEY: '{{KAKAO_REST_API_KEY}}',\n    refresh_token: refreshToken\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        0
+      ],
+      "id": "bbb483b1-1abf-4144-9d04-cb2339cce752",
+      "name": "refresh_token 추출"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kauth.kakao.com/oauth/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "refresh_token"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $json.REST_API_KEY }}"
+            },
+            {
+              "name": "refresh_token",
+              "value": "={{ $json.refresh_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        0
+      ],
+      "id": "601fe30f-9f72-4c04-9e9e-4edd5c19f300",
+      "name": "토큰 갱신 요청"
+    },
+    {
+      "parameters": {
+        "jsCode": "// access_token만 반환 (호출 워크플로우에서 사용)\nconst response = $input.first().json\n\nif (!response.access_token) {\n  throw new Error(`access_token 발급 실패: ${JSON.stringify(response)}`)\n}\n\nreturn [{\n  json: {\n    access_token: response.access_token,\n    expires_in: response.expires_in\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "5c2cbf3a-8961-4688-9f1b-b1f88ab07932",
+      "name": "access_token 추출"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "토큰 시트 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "토큰 시트 조회": {
+      "main": [
+        [
+          {
+            "node": "refresh_token 추출",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "refresh_token 추출": {
+      "main": [
+        [
+          {
+            "node": "토큰 갱신 요청",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "토큰 갱신 요청": {
+      "main": [
+        [
+          {
+            "node": "access_token 추출",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

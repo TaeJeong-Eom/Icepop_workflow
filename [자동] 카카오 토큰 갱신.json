@@ -1,0 +1,363 @@
+{
+  "name": "[자동] 카카오 토큰 갱신",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        112
+      ],
+      "id": "885a0208-caca-4a43-acb3-88644ce2445b",
+      "name": "Execute Workflow"
+    },
+    {
+      "parameters": {
+        "url": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/gviz/tq?tqx=out:json&sheet=카카오_토큰&tq=SELECT *",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        176,
+        16
+      ],
+      "id": "b19d18b4-0609-421b-bf79-99e6bd5affb5",
+      "name": "기존 토큰 조회"
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseGviz(raw) {\n  const match = raw.match(/google\\.visualization\\.Query\\.setResponse\\((.*)\\);?\\s*$/s)\n  if (!match) throw new Error('gviz 파싱 실패')\n  return JSON.parse(match[1])\n}\n\nconst parsed = parseGviz($input.first().json.data)\n\nif (!parsed.table.rows || parsed.table.rows.length === 0) {\n  throw new Error('카카오_토큰 시트가 비어있음')\n}\n\nconst row = parsed.table.rows[1]\nconst refreshToken = row.c[1]?.v || ''\n\nif (!refreshToken) {\n  throw new Error('refresh_token이 시트에 없음')\n}\n\nreturn [{\n  json: {\n    REST_API_KEY: '{{KAKAO_REST_API_KEY}}',\n    refresh_token: refreshToken,\n    debug_row_structure: JSON.stringify(row)\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        16
+      ],
+      "id": "9b8a8cfb-ae5d-48ed-a28f-c9edd809bf32",
+      "name": "기존 refresh_token 추출"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kauth.kakao.com/oauth/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "refresh_token"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $json.REST_API_KEY }}"
+            },
+            {
+              "name": "refresh_token",
+              "value": "={{ $json.refresh_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        16
+      ],
+      "id": "4318be51-c49b-4e6a-af34-a92b3dab04e0",
+      "name": "토큰 갱신 요청"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 응답 처리:\n// - access_token: 항상 받음 (6시간)\n// - refresh_token: refresh 만료 1달 이내일 때만 받음\nconst response = $input.first().json\n\nif (!response.access_token) {\n  throw new Error(`갱신 실패: ${JSON.stringify(response)}`)\n}\n\nconst hasNewRefreshToken = !!response.refresh_token\n\nconst today = new Date()\nconst todayStr = today.toISOString().split('T')[0]\nconst expiryDate = new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000)\nconst expiryStr = expiryDate.toISOString().split('T')[0]\n\nreturn [{\n  json: {\n    access_token: response.access_token,\n    new_refresh_token: response.refresh_token || null,\n    hasNewRefreshToken,\n    발급일: todayStr,\n    만료일: expiryStr,\n    토큰명: '카카오'\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        16
+      ],
+      "id": "8392d9db-1ac4-427b-b065-ab374fbddb19",
+      "name": "응답 처리"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "check-new-token",
+              "leftValue": "={{ $json.hasNewRefreshToken }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1056,
+        16
+      ],
+      "id": "69aed6b0-d1d7-4501-849f-8dc283647a45",
+      "name": "새 refresh_token 받음?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('응답 처리').first().json\nreturn [{\n  json: {\n    토큰명: data.토큰명,\n    refresh_token: data.new_refresh_token,\n    발급일: data.발급일,\n    만료일: data.만료일\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        -96
+      ],
+      "id": "50e5e362-09ab-4c30-8346-9ee6bbf24f6b",
+      "name": "시트 출력 준비"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 998306282,
+          "mode": "list",
+          "cachedResultName": "카카오_토큰",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=998306282"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "토큰명"
+          ],
+          "schema": [
+            {
+              "id": "토큰명",
+              "displayName": "토큰명",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "refresh_token",
+              "displayName": "refresh_token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "발급일",
+              "displayName": "발급일",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "만료일",
+              "displayName": "만료일",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1728,
+        -96
+      ],
+      "id": "ae6a5898-2ed6-4b52-b8d8-3b63f636a1d4",
+      "name": "시트 Append"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 새 refresh_token 없음 = 잔여 30일 초과 (정상)\n// 시트 안 건드림\nconsole.log('refresh_token 잔여 충분. 시트 갱신 안 함.')\nreturn [{\n  json: {\n    message: 'refresh_token 잔여 충분, 시트 안 건드림',\n    access_token_received: true\n  }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        112
+      ],
+      "id": "7925f491-9764-40f0-874f-b5d78fcaad9a",
+      "name": "시트 갱신 안 함"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 2
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -64,
+        -96
+      ],
+      "id": "b4a50bff-52a3-4cad-8a4c-94c2e0af0644",
+      "name": "2주에 한번 실행"
+    }
+  ],
+  "connections": {
+    "Execute Workflow": {
+      "main": [
+        [
+          {
+            "node": "기존 토큰 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "기존 토큰 조회": {
+      "main": [
+        [
+          {
+            "node": "기존 refresh_token 추출",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "기존 refresh_token 추출": {
+      "main": [
+        [
+          {
+            "node": "토큰 갱신 요청",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "토큰 갱신 요청": {
+      "main": [
+        [
+          {
+            "node": "응답 처리",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답 처리": {
+      "main": [
+        [
+          {
+            "node": "새 refresh_token 받음?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "새 refresh_token 받음?": {
+      "main": [
+        [
+          {
+            "node": "시트 출력 준비",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "시트 갱신 안 함",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "시트 출력 준비": {
+      "main": [
+        [
+          {
+            "node": "시트 Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2주에 한번 실행": {
+      "main": [
+        [
+          {
+            "node": "기존 토큰 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

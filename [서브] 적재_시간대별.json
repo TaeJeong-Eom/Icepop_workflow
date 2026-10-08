@@ -1,0 +1,327 @@
+{
+  "name": "[서브] 적재_시간대별",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        -192
+      ],
+      "id": "2a3f0fc7-2c16-463c-85a2-ba19347e4f07",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -96,
+        96
+      ],
+      "id": "9bf72312-a56a-4981-a94b-1ebb6b71e303",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "BbpvnagtCA0lJOsg",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/BbpvnagtCA0lJOsg",
+          "cachedResultName": "[서브] 조회_시간대별 1호점"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        -144
+      ],
+      "id": "5a4d2f4c-175c-46df-9095-5ea12803106b",
+      "name": "조회: 시간대별매출 1호점"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "ysIPjZs2KU9w7isQ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/ysIPjZs2KU9w7isQ",
+          "cachedResultName": "[서브] 조회_시간대별 2호점"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        48
+      ],
+      "id": "31a0dce5-b990-43b4-8437-0eb55b7fcc1d",
+      "name": "조회: 시간대별매출 2호점"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        352,
+        -48
+      ],
+      "id": "1c3974a6-5a23-4d9f-b7a0-78fca922e106",
+      "name": "두 매장 결과 합치기"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 조회 워크플로우 결과를 시트 적재 형식으로 변환\nconst items = $input.all();\n\nconst result = items.map(item => {\n  const data = item.json;\n  \n  // UNIQUE_KEY 생성: 매출일자_매장코드_시간대\n  const uniqueKey = `${data.SALE_DATE}_${data.SHOP_CD}_${data.HOUR}`;\n  \n  return {\n    json: {\n      '매출일자':    data.SALE_DATE,\n      '매장코드':    data.SHOP_CD,\n      '매장명':      data.SHOP_NM,\n      '요일':        data.DY,\n      '날씨':        data.WEATHER,\n      '시간대':      data.HOUR,\n      '시간대매출':  data.SALE_AMT,\n      '시간대수량':  data.SALE_QTY,\n      '일총매출':    data.DAY_TOTAL_AMT,\n      '일총수량':    data.DAY_TOTAL_QTY,\n      '중복방지키':  uniqueKey,\n    }\n  };\n});\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        -48
+      ],
+      "id": "cbeffa43-c218-412c-9370-4cf184a7869b",
+      "name": "한글 매핑 + UNIQUE_KEY 생성"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "시간대별매출",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "매출일자",
+              "displayName": "매출일자",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "매장코드",
+              "displayName": "매장코드",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "매장명",
+              "displayName": "매장명",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "요일",
+              "displayName": "요일",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "날씨",
+              "displayName": "날씨",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "시간대",
+              "displayName": "시간대",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "시간대매출",
+              "displayName": "시간대매출",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "시간대수량",
+              "displayName": "시간대수량",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "일총매출",
+              "displayName": "일총매출",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "일총수량",
+              "displayName": "일총수량",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "중복방지키",
+              "displayName": "중복방지키",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        -48
+      ],
+      "id": "cb7d6056-e13b-44e3-ba12-65eff50bc859",
+      "name": "Google Sheets: 시간대별매출 적재"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "조회: 시간대별매출 1호점",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "조회: 시간대별매출 2호점",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "조회: 시간대별매출 1호점",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "조회: 시간대별매출 2호점",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "조회: 시간대별매출 1호점": {
+      "main": [
+        [
+          {
+            "node": "두 매장 결과 합치기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "조회: 시간대별매출 2호점": {
+      "main": [
+        [
+          {
+            "node": "두 매장 결과 합치기",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "두 매장 결과 합치기": {
+      "main": [
+        [
+          {
+            "node": "한글 매핑 + UNIQUE_KEY 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "한글 매핑 + UNIQUE_KEY 생성": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: 시간대별매출 적재",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

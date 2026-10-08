@@ -1,0 +1,484 @@
+{
+  "name": "[백필] 영수증별 1호점",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "29197e95-137a-4300-8621-9d8770fa1102",
+      "name": "Execute workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 백필 기간 설정 (1호점: 2024-01-01 ~ 오늘)\nconst startYear = 2026;\nconst startMonth = 5;\n\nconst today = new Date();\nconst endYear = today.getFullYear();\nconst endMonth = today.getMonth() + 1;\n\nconst months = [];\n\nlet y = startYear;\nlet m = startMonth;\n\nwhile (y < endYear || (y === endYear && m <= endMonth)) {\n  const yyyy = y;\n  const mm = String(m).padStart(2, '0');\n  \n  // 월의 첫날\n  const startDate = `${yyyy}-${mm}-01`;\n  \n  // 월의 마지막날 (다음 달 1일 - 1일)\n  const lastDay = new Date(y, m, 0).getDate();\n  const endDate = `${yyyy}-${mm}-${String(lastDay).padStart(2, '0')}`;\n  \n  months.push({\n    json: {\n      year: yyyy,\n      month: mm,\n      startDate,\n      endDate\n    }\n  });\n  \n  m++;\n  if (m > 12) {\n    m = 1;\n    y++;\n  }\n}\n\nreturn months;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "99ffa745-1a91-45fb-96ad-2087d05e845e",
+      "name": "월 목록 생성"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "c4c1360e-f4f1-4dcb-91a7-1c7d7fda8464",
+      "name": "Loop Over Months"
+    },
+    {
+      "parameters": {
+        "url": "http://k.poshub.co.kr/login/top_frame.jsp?v_user_id=",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "=JSESSIONID={{$('Call \\'[서브] POSHUB 인증\\'').item.json.jsessionid}}; user_id={{POS_USER_ID}}; user_pwd={{POS_PASSWORD}}"
+            },
+            {
+              "name": "Referer",
+              "value": "http://k.poshub.co.kr/login/login_check.jsp"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        896,
+        0
+      ],
+      "id": "3dc2b92e-802e-4e6b-b7ac-81dcb56c4ec2",
+      "name": "세션 초기화"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://k.poshub.co.kr/sale/sale/period_bill010.jsp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "=JSESSIONID={{$('Call \\'[서브] POSHUB 인증\\'').item.json.jsessionid}}; user_id={{POS_USER_ID}}; user_pwd={{POS_PASSWORD}}; s_SHOP_CD_S=; s_SHOP_NM_S=; s_GROUP_TYPE_S=; month1=2026-05; month2=2026-05; s_SHOP_CD_M=STORE_CODE_1; s_SHOP_NM_M=; s_GROUP_TYPE_M="
+            },
+            {
+              "name": "Referer",
+              "value": "http://k.poshub.co.kr/login/top_frame.jsp"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=EUC-KR"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/x-www-form-urlencoded",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "9fbe3f4d-956d-4f20-b3ed-39333f2fbcd3",
+      "name": "페이지 방문"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://k.poshub.co.kr/ddd.sheetAction",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "=JSESSIONID={{$('Call \\'[서브] POSHUB 인증\\'').item.json.jsessionid}}; user_id={{POS_USER_ID}}; user_pwd={{POS_PASSWORD}}; s_SHOP_CD_S=; s_SHOP_NM_S=; s_GROUP_TYPE_S=; month1=2026-05; month2=2026-05; s_SHOP_CD_M=STORE_CODE_1; s_SHOP_NM_M=; s_GROUP_TYPE_M="
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded; charset=EUC-KR"
+            },
+            {
+              "name": "User-Agent",
+              "value": "IBLeaders IBSheet"
+            },
+            {
+              "name": "Referer",
+              "value": "http://k.poshub.co.kr/sale/sale/period_bill010.jsp"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/x-www-form-urlencoded",
+        "body": "=S_CONTROLLER=sale.sale.period_bill010&S_METHOD=search&S_SAVENAME=%7CSHOP_CD%7CSHOP_NM%7CSALE_DATE%7CPOS_NO%7CBILL_NO%7CDTL_NO%7CBRAND_CD%7CBRAND_NM%7CPROD_CD%7CBAR_CD%7CPROD_NM%7CSALE_AMT%7CDC_AMT%7CDCM_SALE_AMT%7C&S_FORWARD=&S_TREECOL=&SHEETSEQ=1&MS_fg=M&GROUP_TYPE_M=&mySheet1=&date1_1={{$('Loop Over Months').item.json.startDate}}&date1_2={{$('Loop Over Months').item.json.endDate}}&date_period1=0&s_SHOP_CD=STORE_CODE_1&s_SHOP_NM=%5BSTORE_CODE_1%5D+%BE%C6%C0%CC%BD%BA%C6%CB1%C8%A3%C1%A1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "ede99492-e1c9-4de8-a3fe-4ca9432b7be4",
+      "name": "영수증별 매출 조회"
+    },
+    {
+      "parameters": {
+        "jsCode": "const xmlData = $input.first().json.data;\nconst rows = xmlData.match(/<TR>([\\s\\S]*?)<\\/TR>/g) || [];\n\n// === 매장 정보 ===\nconst SHOP_CD = 'STORE_CODE_1';\nconst SHOP_NM = '아이스팝1호점';\n// ==================\n\nconst result = [];\n\nrows.forEach(row => {\n  const cells = row.match(/<TD><!\\[CDATA\\[(.*?)\\]\\]><\\/TD>/g) || [];\n  const values = cells.map(cell => cell.match(/<TD><!\\[CDATA\\[(.*?)\\]\\]><\\/TD>/)[1]);\n  \n  if (!values[5]) return; // BILL_NO 없으면 빈 행\n  \n  const SALE_DATE_RAW = values[3];\n  const SALE_DATE = SALE_DATE_RAW.includes('-')\n    ? SALE_DATE_RAW\n    : `${SALE_DATE_RAW.slice(0,4)}-${SALE_DATE_RAW.slice(4,6)}-${SALE_DATE_RAW.slice(6,8)}`;\n  \n  const POS_NO = values[4];\n  const BILL_NO = values[5];\n  const DTL_NO = values[6];\n  const BAR_CD = values[10];\n  const PROD_NM = values[11];\n  const SALE_AMT = parseInt(values[12]) || 0;\n  const DC_AMT = parseInt(values[13]) || 0;\n  const DCM_SALE_AMT = parseInt(values[14]) || 0;\n  \n  const 중복방지키 = `${SALE_DATE.replace(/-/g, '')}_${SHOP_CD}_${POS_NO}_${BILL_NO}_${DTL_NO}`;\n  \n  result.push({\n    json: {\n      매출일자: SALE_DATE,\n      매장코드: SHOP_CD,\n      매장명: SHOP_NM,\n      포스: POS_NO,\n      영수: BILL_NO,\n      순번: DTL_NO,\n      바코드: BAR_CD,\n      상품명: PROD_NM,\n      총매출: SALE_AMT,\n      할인액: DC_AMT,\n      실매출: DCM_SALE_AMT,\n      중복방지키\n    }\n  });\n});\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "id": "db211511-3763-4c12-a538-81a5d240186f",
+      "name": "XML to JSON"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ICEPOP_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 481477743,
+          "mode": "list",
+          "cachedResultName": "영수증별매출",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_ICEPOP_SHEET_ID/edit#gid=481477743"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "중복방지키"
+          ],
+          "schema": [
+            {
+              "id": "매출일자",
+              "displayName": "매출일자",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "매장코드",
+              "displayName": "매장코드",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "매장명",
+              "displayName": "매장명",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "포스",
+              "displayName": "포스",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "영수",
+              "displayName": "영수",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "순번",
+              "displayName": "순번",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "바코드",
+              "displayName": "바코드",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "상품명",
+              "displayName": "상품명",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "총매출",
+              "displayName": "총매출",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "할인액",
+              "displayName": "할인액",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "실매출",
+              "displayName": "실매출",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "중복방지키",
+              "displayName": "중복방지키",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1792,
+        0
+      ],
+      "id": "4685098b-592c-460e-a756-a804a64a6bb8",
+      "name": "Google Sheets: 영수증별매출 적재"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "ay5ffIZeWS1x994h",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/ay5ffIZeWS1x994h",
+          "cachedResultName": "[서브] POSHUB 인증"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [
+            "test"
+          ],
+          "schema": [
+            {
+              "id": "test",
+              "displayName": "test",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        0
+      ],
+      "id": "bb1c82ee-0ea7-4cf6-9322-74a4c1b9f72b",
+      "name": "Call '[서브] POSHUB 인증'"
+    },
+    {
+      "parameters": {
+        "content": "# 영수증별 백필 (1호점)\n\n## 용도\n1호점 영수증별 매출 데이터 백필 (과거 데이터 채우기)\n\n## 실행 방법\n- 수동 실행만 (Execute Workflow 버튼)\n- 자동 X\n\n## 사용 시점\n- 자동 적재 실패한 기간 데이터 채울 때\n- 새 인스턴스 셋업 후 과거 데이터 가져올 때\n\n## 사용 방법\n1. \"월 목록 생성\" Code 노드 열기\n2. startYear, startMonth 수정 (시작 월)\n3. Execute Workflow 클릭\n\n## 동작\n시작월~오늘까지 월 단위 루프\n  ↓\n각 월마다:\n  - POSHUB 인증\n  - 영수증별 매출 조회 (월 단위)\n  - XML → JSON\n  - 시트 적재 (appendOrUpdate)\n\n## 적재 대상\n시트: 아이스팝코리아_매출데이터\n탭: 영수증별매출\n\n## 주의사항\n- POSHUB에 큰 부담 (월 30일치 호출)\n- 가능한 시간대 (점심/새벽 등) 골라 실행\n- 중복방지키로 매칭하니 기존 데이터 덮어쓰기 안전",
+        "height": 832,
+        "width": 368
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        0
+      ],
+      "id": "91776623-9b96-491e-9b2e-19a8011d56e3",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## 수동데이터 백업하는 방법\n* 아래 '월 목록 생성' 노드 클릭\n\n// 백필 기간 설정 (1호점: 2024-01-01 ~ 오늘)\nconst startYear = 2026; <- 연\nconst startMonth = 5; <- 월\n\n* 두 곳의 코드를 수정\n* 날짜 기준은 코드기입(부터) ~ 오늘까지 백업됨\n* 수정 후 Execute workflow(주황색 버튼을 클릭하여 작동)",
+        "height": 224,
+        "width": 384
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        224,
+        -240
+      ],
+      "id": "cde48768-9b01-4af9-b735-db84ffdfe362",
+      "name": "Sticky Note1"
+    }
+  ],
+  "connections": {
+    "Execute workflow": {
+      "main": [
+        [
+          {
+            "node": "월 목록 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "월 목록 생성": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Months",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Months": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Call '[서브] POSHUB 인증'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "세션 초기화": {
+      "main": [
+        [
+          {
+            "node": "페이지 방문",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "페이지 방문": {
+      "main": [
+        [
+          {
+            "node": "영수증별 매출 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "영수증별 매출 조회": {
+      "main": [
+        [
+          {
+            "node": "XML to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "XML to JSON": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: 영수증별매출 적재",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: 영수증별매출 적재": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Months",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call '[서브] POSHUB 인증'": {
+      "main": [
+        [
+          {
+            "node": "세션 초기화",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}
